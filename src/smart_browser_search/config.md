@@ -1,7 +1,7 @@
 # Smart Browser Search — configuration
 
-Most people never need to touch this. Use **Tools → Smart AI Search Settings…** for a
-friendly dialog instead. This page documents every key for power users.
+Most people never need to touch this. Use **Tools → Smart Browser Search: Settings…**
+for a friendly dialog instead. This page documents every key for power users.
 
 > **Safety:** this add-on is **read-only**. It never edits, adds, deletes, or
 > reschedules cards. It only *reads* your notes and *emits search strings*.
@@ -21,19 +21,25 @@ friendly dialog instead. This page documents every key for power users.
 
 ## Models
 
-- **`chat_model`** — the assistant/reasoning model, e.g. `qwen2.5:7b-instruct`,
-  `llama3.1:8b`, `llama3.2:3b` (smaller/faster).
+Easiest path: open **Tools → Smart Browser Search: Settings…**, pick a tier under
+**Recommended models** that matches your hardware, click **Use these models**, then
+**Download with Ollama**. The keys below are what those buttons set.
+
+- **`chat_model`** — the assistant/reasoning model. Ships with `qwen2.5:3b-instruct`
+  (Light tier). Heavier options: `qwen2.5:7b-instruct` (Medium), `qwen2.5:14b-instruct`
+  (High).
 - **`embed_model`** — embeddings model for semantic search, e.g.
   `nomic-embed-text` (768-dim, fast). Changing this rebuilds the index.
-- **`vision_model`** — vision model for picture search / image captioning, e.g.
-  `qwen2.5vl:7b`, `llava`, `moondream` (small/fast).
+- **`vision_model`** — vision model for picture search / image captioning. Ships with
+  `moondream` (tiny); heavier option `qwen2.5vl:7b`.
 - **`temperature`**, **`num_ctx`** — generation knobs passed to the model.
 
-Install the defaults with:
+The three hardware tiers (Light / Medium / High) and which GPU each suits are
+described in the Settings dialog and the README. Install a tier by hand with, e.g.:
 ```
-ollama pull qwen2.5:7b-instruct
+ollama pull qwen2.5:3b-instruct   # Light (default)
 ollama pull nomic-embed-text
-ollama pull qwen2.5vl:7b
+ollama pull moondream
 ```
 
 ## Retrieval

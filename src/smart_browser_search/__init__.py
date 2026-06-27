@@ -36,11 +36,9 @@ def _init() -> None:
         from .ui.settings import open_settings as _open
         _open(mw)
 
-    def build_index(*_args) -> None:
-        from .index import indexer
-        indexer.run_index(force_rebuild=False)
-
     def add_tools_menu() -> None:
+        # A single entry under Tools; index building, connection tests, model
+        # downloads, scope and safety all live inside this one dialog.
         try:
             menu = mw.form.menuTools
         except Exception as e:
@@ -49,10 +47,6 @@ def _init() -> None:
         settings_action = QAction(f"{const.ADDON_NAME}: Settings…", mw)
         qconnect(settings_action.triggered, open_settings)
         menu.addAction(settings_action)
-
-        index_action = QAction(f"{const.ADDON_NAME}: Build / update index", mw)
-        qconnect(index_action.triggered, build_index)
-        menu.addAction(index_action)
 
     # The Config button in the add-on manager opens our dialog instead of raw JSON.
     try:

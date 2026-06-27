@@ -2,6 +2,20 @@
 
 All notable changes to Smart Browser Search are documented here.
 
+## Unreleased
+
+- **Single Tools-menu entry.** Everything now lives under **Tools → Smart Browser
+  Search: Settings…** (index building, connection test, model downloads, scope, and
+  the safety check are all inside that one dialog).
+- **Hardware-tier model presets.** A new *Recommended models* section in Settings
+  lets you pick **Light / Medium / High** by your GPU (keyed to NVIDIA baselines),
+  apply the models with one click, and **Download with Ollama** any you're missing,
+  with live progress.
+- **Lighter default.** Ships with the Light tier (`qwen2.5:3b-instruct` +
+  `moondream`) so it runs on almost any machine out of the box; switch up in Settings.
+- **Comprehensive README** with step-by-step usage, screen-by-screen descriptions,
+  and the model-tier guidance.
+
 ## 1.0.0
 
 Initial release.

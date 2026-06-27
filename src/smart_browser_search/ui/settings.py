@@ -17,6 +17,16 @@ from ..index import indexer
 from ..search import semantic
 
 
+def _model_installed(name: str, installed: set[str]) -> bool:
+    """True if ``name`` is among Ollama's installed tags, tolerating the implicit
+    ``:latest`` tag (Ollama stores ``nomic-embed-text`` as ``nomic-embed-text:latest``)."""
+    if name in installed:
+        return True
+    if ":" not in name and f"{name}:latest" in installed:
+        return True
+    return False
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent or mw)
@@ -57,8 +67,33 @@ class SettingsDialog(QDialog):
         form.addRow("", self.conn_label)
         root.addWidget(conn)
 
+        # --- Recommended models (hardware tier) ---
+        rec = QGroupBox("Recommended models — pick by your hardware")
+        rec_l = QVBoxLayout(rec)
+        self.preset_combo = QComboBox()
+        for p in const.MODEL_PRESETS:
+            self.preset_combo.addItem(p["label"], p["id"])
+        self.preset_guidance = QLabel("")
+        self.preset_guidance.setWordWrap(True)
+        self.preset_guidance.setTextFormat(Qt.TextFormat.RichText)
+        prow = QHBoxLayout()
+        self.use_preset_btn = QPushButton("Use these models")
+        self.download_preset_btn = QPushButton("Download with Ollama")
+        prow.addWidget(self.use_preset_btn)
+        prow.addWidget(self.download_preset_btn)
+        prow.addStretch(1)
+        prow_wrap = QWidget()
+        prow_wrap.setLayout(prow)
+        self.preset_status = QLabel("")
+        self.preset_status.setWordWrap(True)
+        rec_l.addWidget(self.preset_combo)
+        rec_l.addWidget(self.preset_guidance)
+        rec_l.addWidget(prow_wrap)
+        rec_l.addWidget(self.preset_status)
+        root.addWidget(rec)
+
         # --- Models ---
-        models = QGroupBox("Models")
+        models = QGroupBox("Models (advanced — or set them with a preset above)")
         mform = QFormLayout(models)
         self.chat_model = QComboBox()
         self.chat_model.setEditable(True)
@@ -139,6 +174,9 @@ class SettingsDialog(QDialog):
 
         qconnect(self.test_btn.clicked, self._test)
         qconnect(self.detect_btn.clicked, self._detect)
+        qconnect(self.preset_combo.currentIndexChanged, self._update_preset_guidance)
+        qconnect(self.use_preset_btn.clicked, self._apply_preset)
+        qconnect(self.download_preset_btn.clicked, self._download_preset)
         qconnect(self.build_btn.clicked, lambda: self._build_index(False))
         qconnect(self.rebuild_btn.clicked, lambda: self._build_index(True))
         qconnect(self.safety_btn.clicked, self._safety_check)
@@ -152,6 +190,8 @@ class SettingsDialog(QDialog):
         self.chat_model.setEditText(c.get("chat_model", ""))
         self.embed_model.setEditText(c.get("embed_model", ""))
         self.vision_model.setEditText(c.get("vision_model", ""))
+        self._select_matching_preset(c.get("chat_model", ""))
+        self._update_preset_guidance()
         self.temperature.setValue(float(c.get("temperature", 0.2)))
         self.max_results.setValue(int(c.get("max_results", 25)))
         self.semantic_enabled.setChecked(bool(c.get("semantic_enabled")))
@@ -228,6 +268,84 @@ class SettingsDialog(QDialog):
             combo.clear()
             combo.addItems(models)
             combo.setEditText(current)
+
+    # ------------------------------------------------------------------ #
+    # Recommended-model presets
+    # ------------------------------------------------------------------ #
+    def _current_preset(self) -> dict:
+        idx = max(0, self.preset_combo.currentIndex())
+        return const.MODEL_PRESETS[idx]
+
+    def _select_matching_preset(self, chat_model: str) -> None:
+        """Highlight the tier whose chat model matches the saved config."""
+        for i, p in enumerate(const.MODEL_PRESETS):
+            if p["chat_model"] == chat_model:
+                self.preset_combo.setCurrentIndex(i)
+                return
+
+    def _update_preset_guidance(self, *_args) -> None:
+        p = self._current_preset()
+        self.preset_guidance.setText(
+            f"<b>Chat:</b> {p['chat_model']} &nbsp;·&nbsp; "
+            f"<b>Embeddings:</b> {p['embed_model']} &nbsp;·&nbsp; "
+            f"<b>Vision:</b> {p['vision_model']}<br>"
+            f"≈ {p['chat_gb']:.1f} GB chat-model download &nbsp;·&nbsp; "
+            f"needs about {p['min_vram_gb']} GB of GPU memory (or runs on CPU, slower)."
+            f"<br><b>Pick this if you have:</b> {p['gpu']}")
+
+    def _apply_preset(self) -> None:
+        p = self._current_preset()
+        self.chat_model.setEditText(p["chat_model"])
+        self.embed_model.setEditText(p["embed_model"])
+        self.vision_model.setEditText(p["vision_model"])
+        tooltip(f"Set to the {p['id']} models — click Save to keep them, "
+                f"then “Download with Ollama” if you don’t have them yet.",
+                parent=self)
+
+    def _set_preset_status(self, text: str) -> None:
+        """Thread-safe status update for the preset row (M4-style alive guard)."""
+        def _u() -> None:
+            if self._alive():
+                self.preset_status.setText(text)
+        ops.on_main(_u)
+
+    def _download_preset(self) -> None:
+        p = self._current_preset()
+        client = self._client()
+        if client.backend != const.BACKEND_OLLAMA:
+            tooltip("Downloading models requires the Ollama backend. For LM Studio / "
+                    "llama.cpp, load the models in that app instead.", parent=self)
+            return
+        # Deduplicate while preserving order (embed model is shared across tiers).
+        wanted = list(dict.fromkeys(
+            m for m in (p["chat_model"], p["embed_model"], p["vision_model"]) if m))
+        self.preset_status.setText("Checking which models you already have…")
+
+        def task():
+            installed = set(client.list_models())
+            todo = [m for m in wanted if not _model_installed(m, installed)]
+            if not todo:
+                return {"already": True}
+            for m in todo:
+                def prog(status, completed, total, _m=m):
+                    pct = f" — {completed * 100 // total}%" if total else ""
+                    self._set_preset_status(f"Downloading {_m}: {status}{pct}")
+                client.pull_model(m, on_progress=prog)
+            return {"pulled": todo}
+
+        def ok(res):
+            if not self._alive():
+                return
+            if res.get("already"):
+                self.preset_status.setText("✓ All recommended models are already installed.")
+            else:
+                self.preset_status.setText("✓ Downloaded: " + ", ".join(res["pulled"]))
+            self._detect()  # refresh the model dropdowns from the server
+
+        def fail(exc):
+            self._set_preset_status(f"✗ Download failed: {exc}")
+
+        ops.run_network(task, ok, fail)
 
     def _build_index(self, force: bool) -> None:
         # Persist current choices first so the indexer uses them.

@@ -123,6 +123,59 @@ class AIClient:
         except Exception:
             return []
 
+    def pull_model(self, model: str, on_progress=None, cancel=None) -> None:
+        """Download a model via Ollama's ``/api/pull`` (streaming NDJSON progress).
+
+        Ollama only — OpenAI-compatible servers can't fetch models on demand.
+        ``on_progress(status, completed, total)`` is called as bytes arrive (called
+        from the calling thread — marshal to the UI thread yourself); ``cancel``
+        (a ``threading.Event``) aborts the stream between chunks.
+        """
+        if self.backend != const.BACKEND_OLLAMA:
+            raise AIError("Model download is only available with the Ollama backend. "
+                          "For LM Studio / llama.cpp, load the model in that app instead.")
+        if not model:
+            raise AIError("No model name given.")
+        url = f"{self.endpoint}/api/pull"
+        data = json.dumps({"model": model, "stream": True}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
+        # A multi-GB pull streams continuously; the timeout is per blocking read,
+        # so a generous value tolerates slow mirrors without hanging forever.
+        timeout = max(self.request_timeout, 300)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                for raw in resp:
+                    if cancel is not None and cancel.is_set():
+                        return
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except Exception:
+                        continue
+                    if msg.get("error"):
+                        raise AIError(str(msg["error"]))
+                    if on_progress is not None:
+                        on_progress(
+                            str(msg.get("status", "")),
+                            int(msg.get("completed") or 0),
+                            int(msg.get("total") or 0),
+                        )
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                pass
+            raise AIError(f"HTTP {e.code} from {url}: {body or e.reason}") from e
+        except AIError:
+            raise
+        except Exception as e:
+            if _is_conn_error(e):
+                raise AIConnectionError(str(e)) from e
+            raise AIError(str(e)) from e
+
     def capabilities(self, model: str) -> set[str]:
         """Capability set for a model (e.g. {'vision','embedding'}).
 

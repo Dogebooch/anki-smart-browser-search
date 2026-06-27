@@ -292,12 +292,18 @@ class AIClient:
                 return [[float(x) for x in v] for v in embs]
         except AIError as e:
             log.warn(f"/api/embed failed ({e}); falling back to /api/embeddings")
-        # Legacy fallback: one request per text.
+        # Legacy fallback: one request per text. A single failing item (e.g. one
+        # over-long note the batch endpoint rejected) yields an empty vector and
+        # is skipped by the caller rather than aborting the whole batch.
         out: list[list[float]] = []
         for t in texts:
-            data = self._post(f"{self.endpoint}/api/embeddings",
-                              {"model": model, "prompt": t}, self.request_timeout)
-            out.append([float(x) for x in data.get("embedding", [])])
+            try:
+                data = self._post(f"{self.endpoint}/api/embeddings",
+                                  {"model": model, "prompt": t}, self.request_timeout)
+                out.append([float(x) for x in data.get("embedding", [])])
+            except AIError as e:
+                log.warn(f"/api/embeddings skipped one input ({e})")
+                out.append([])
         return out
 
     def _embed_openai(self, texts: list[str], model: str) -> list[list[float]]:

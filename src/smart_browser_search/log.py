@@ -25,7 +25,13 @@ def set_debug(enabled: bool) -> None:
 def _write(level: str, msg: str) -> None:
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}"
     if level in ("WARN", "ERROR"):
-        print(f"[SmartBrowserSearch] {line}", file=sys.stderr)
+        # Anki may redirect sys.stderr to a wrapper (e.g. colorama over an
+        # ErrorHandler) that lacks .flush(); a failing echo must never turn a
+        # logged warning into a fatal exception. Guard it and move on.
+        try:
+            print(f"[SmartBrowserSearch] {line}", file=sys.stderr, flush=False)
+        except Exception:
+            pass
     if not _DEBUG and level == "DEBUG":
         return
     try:

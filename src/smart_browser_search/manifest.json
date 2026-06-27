@@ -3,6 +3,6 @@
     "name": "Smart Browser Search — AI card finder",
     "min_point_version": 240600,
     "homepage": "https://github.com/Dogebooch/anki-smart-browser-search",
-    "human_version": "1.0.0",
+    "human_version": "1.0.1",
     "conflicts": []
 }

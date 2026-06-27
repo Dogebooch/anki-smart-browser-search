@@ -2,6 +2,17 @@
 
 All notable changes to Smart Browser Search are documented here.
 
+## 1.0.1
+
+- **Fixed a crash when indexing long notes.** A note whose text exceeded the
+  embedding model's context window made Ollama return HTTP 400; inputs are now
+  capped before embedding, and an over-long single note is skipped (and retried
+  next run) rather than failing its whole batch.
+- **Logging can no longer crash the add-on.** Under Anki 25.09's stderr
+  redirection, echoing a warning could raise `AttributeError: 'ErrorHandler'
+  object has no attribute 'flush'` and turn a recoverable warning into a fatal
+  error dialog. The stderr echo is now guarded.
+
 ## Unreleased
 
 - **Single Tools-menu entry.** Everything now lives under **Tools → Smart Browser

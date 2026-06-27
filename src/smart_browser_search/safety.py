@@ -34,16 +34,21 @@ FORBIDDEN_PATTERNS: list[str] = [
     r"\.remove_cards_and_orphaned_notes\s*\(",
     r"\.remove_cards\s*\(",
     r"\.set_due_date\s*\(",
+    r"\.reschedule_cards\s*\(",
     r"\.suspend_cards\s*\(",
     r"\.unsuspend_cards\s*\(",
     r"\.bury_cards\s*\(",
-    r"\.add_tags\b",
-    r"\.remove_tags\b",
-    r"\.bulk_add_tags\b",
-    r"\.bulk_remove_tags\b",
+    r"\.set_user_flag_for_cards\s*\(",
+    r"\.add_tag\b",          # also matches add_tags / add_tag (singular)
+    r"\.remove_tag\b",       # also matches remove_tags / remove_tag
+    r"\.bulk_add\b",
+    r"\.bulk_remove\b",
+    r"\.mod_schema\s*\(",
+    r"\bcol\.save\s*\(",
     r"CollectionOp\s*\(",
-    # raw write SQL against the collection db
-    r"col\.db\.execute\s*\(\s*['\"]\s*(insert|update|delete|drop|alter)",
+    # ANY write entrypoint on the collection db (colread never touches col.db,
+    # so flag execute/executemany/executescript regardless of the SQL string).
+    r"col\.db\.(execute|executemany|executescript)\s*\(",
 ]
 
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in FORBIDDEN_PATTERNS]

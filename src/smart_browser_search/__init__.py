@@ -86,11 +86,17 @@ def _init() -> None:
         except Exception as e:
             log.warn(f"theme hook registration failed: {e}")
 
+    # profile_did_open fires on every profile switch; do one-time, non-idempotent
+    # setup (Tools menu, theme hook, safety self-check) only once (M3, L4).
+    state = {"setup_done": False}
+
     def on_profile_open() -> None:
+        if state["setup_done"]:
+            return
+        state["setup_done"] = True
         add_tools_menu()
         register_theme()
-        if cfgmod.get().get("debug_logging"):
-            safety.assert_read_only()
+        safety.assert_read_only()  # cheap regex scan; logs any future regression
 
     gui_hooks.profile_did_open.append(on_profile_open)
     gui_hooks.browser_will_show.append(on_browser_will_show)

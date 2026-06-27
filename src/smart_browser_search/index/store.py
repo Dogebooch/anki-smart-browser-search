@@ -26,6 +26,11 @@ from .. import const, log
 
 class IndexStore:
     def __init__(self, path: str):
+        # Belt-and-suspenders: this store must only ever open its own DB, never
+        # the user's collection. Refuse anything that isn't our index file.
+        if os.path.basename(path) != "index.db":
+            raise ValueError(
+                f"IndexStore refuses to open a non-index database: {path!r}")
         self.path = path
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.con = sqlite3.connect(path, timeout=30)

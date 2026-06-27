@@ -24,7 +24,9 @@ ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
 
 # Bridge command prefixes (JS -> Python). Keep in sync with web/panel.js.
-CMD_SEND = "send"                  # send:<json>  (a full turn payload)
+# Payload is the plain text/value after the first ':' (colons in the value are
+# preserved). Not JSON-encoded.
+CMD_SEND = "send"                  # send:<raw user text>
 CMD_RUN_SEARCH = "run_search"      # run_search:<query>
 CMD_COPY = "copy"                  # copy:<text>
 CMD_REVEAL_CARD = "reveal_card"    # reveal_card:<cid>

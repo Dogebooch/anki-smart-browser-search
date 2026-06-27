@@ -59,10 +59,17 @@ def has_index() -> bool:
 
 
 def search(query_bin: int, query_f32: list[float], top_k: int,
-           candidates: int = 300) -> list[tuple[int, float, str]]:
+           candidates: int = 300,
+           allowed: set[int] | None = None) -> list[tuple[int, float, str]]:
     """Return ``[(note_id, score, kind), ...]`` best-first.
 
-    ``kind`` is 'text' or 'image' (so the UI can flag picture hits).
+    ``kind`` is 'text' or 'image' (so the UI can flag picture hits). ``allowed``,
+    if given, restricts the scan to those note ids (the configured scope) BEFORE
+    truncation so scoping never starves the result set.
+
+    Returns ``[]`` if the query's embedding dimension doesn't match the stored
+    index (e.g. the embedding model changed without a rebuild) — the caller then
+    falls back to keyword-only rather than ranking on garbage Hamming distances.
     """
     path = paths.index_db_path()
     arrays = _load_arrays(path)
@@ -74,10 +81,23 @@ def search(query_bin: int, query_f32: list[float], top_k: int,
     kinds = arrays["kinds"]
     dim = arrays["dim"] or 1
 
-    # Stage 1: Hamming over all vectors (the fast popcount scan).
+    # Guard: query and index must share an embedding space, or Hamming is meaningless.
+    if query_f32 and dim and len(query_f32) != dim:
+        log.warn(f"semantic skipped: query dim {len(query_f32)} != index dim {dim} "
+                 f"(rebuild the index after changing the embedding model)")
+        return []
+
+    # Stage 1: Hamming over all (in-scope) vectors — the fast popcount scan.
     scored: list[tuple[int, int]] = []
-    for idx, b in enumerate(bins):
-        scored.append(((b ^ query_bin).bit_count(), idx))
+    if allowed is None:
+        for idx, b in enumerate(bins):
+            scored.append(((b ^ query_bin).bit_count(), idx))
+    else:
+        for idx, b in enumerate(bins):
+            if note_ids[idx] in allowed:
+                scored.append(((b ^ query_bin).bit_count(), idx))
+    if not scored:
+        return []
     scored.sort(key=lambda t: t[0])
     cand = scored[: max(candidates, top_k)]
 
@@ -101,7 +121,8 @@ def search(query_bin: int, query_f32: list[float], top_k: int,
         if blob:
             score = vectors.cosine(query_f32, vectors.unpack_f32(blob))
         else:
-            score = 1.0 - (h / dim)  # fallback if no f32 stored
+            # Fallback mapped to cosine's [-1, 1] range so mixed rows rank fairly.
+            score = 1.0 - 2.0 * (h / dim)
         prev = best.get(nid)
         if prev is None or score > prev[0]:
             best[nid] = (score, kind)

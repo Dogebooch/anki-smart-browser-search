@@ -14,6 +14,7 @@ Re-running is cheap: an unchanged 40k-note deck does stage 1 (hashing) and stops
 
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 from .. import cfg as cfgmod
@@ -79,26 +80,28 @@ def _scan(col, cfg: dict, force_rebuild: bool) -> dict:
 # --------------------------------------------------------------------------- #
 # Stage 2: embed + caption (no collection)
 # --------------------------------------------------------------------------- #
-def _want_cancel() -> bool:
-    from aqt import mw
-    try:
-        return bool(mw.progress.want_cancel())
-    except Exception:
-        return False
+# After this many consecutive failed batches we assume the server died and stop,
+# rather than grinding through the whole deck hitting timeouts.
+_MAX_CONSECUTIVE_FAILURES = 3
 
 
-def _progress(value: int, maximum: int, label: str) -> None:
+def _progress(value: int, maximum: int, label: str, cancel) -> None:
+    """Marshal a progress update to the main thread and, while there, read the
+    cancel flag off the (Qt) progress dialog and mirror it into ``cancel`` — so
+    the worker thread never touches Qt directly (M1)."""
     from aqt import mw
 
     def _u():
         try:
             mw.progress.update(value=value, max=maximum, label=label)
+            if mw.progress.want_cancel():
+                cancel.set()
         except Exception:
             pass
     ops.on_main(_u)
 
 
-def _embed_and_store(payload: dict, cfg: dict) -> dict:
+def _embed_and_store(payload: dict, cfg: dict, cancel) -> dict:
     client = AIClient(cfg)
     model = payload["model"]
     media_dir = payload.get("media_dir", "")
@@ -117,26 +120,33 @@ def _embed_and_store(payload: dict, cfg: dict) -> dict:
         text_items = [w for w in work if w["need_text"]]
         total = len(text_items) + sum(1 for w in work if w["need_images"])
         done = 0
-        dim = 0
+        consecutive_failures = 0
 
         # --- text vectors, batched ---
         for i in range(0, len(text_items), EMBED_BATCH):
-            if _want_cancel():
+            if cancel.is_set():
                 stats["cancelled"] = True
                 break
             batch = text_items[i:i + EMBED_BATCH]
             texts = [w["text"] for w in batch]
             try:
                 pairs, d = embedder.embed_batch(client, model, texts, "document")
+                consecutive_failures = 0
             except Exception as e:
                 log.error("embedding batch failed", e)
                 stats["errors"] += 1
-                break
+                consecutive_failures += 1
+                # Skip just this batch (its notes stay dirty and retry next run);
+                # bail only if the server appears to be down (H5a).
+                if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    break
+                done += len(batch)
+                _progress(done, total, f"Embedding cards… {done}/{total}", cancel)
+                continue
             if d:
-                dim = d
-                if not store.is_compatible(model, dim):
+                if not store.is_compatible(model, d):
                     store.reset()
-                store.set_meta(model, dim)
+                store.set_meta(model, d)
             for w, (bin_bytes, f32_bytes) in zip(batch, pairs):
                 if bin_bytes:
                     store.replace_text_vector(w["note_id"], bin_bytes, f32_bytes)
@@ -147,13 +157,13 @@ def _embed_and_store(payload: dict, cfg: dict) -> dict:
                     stats["skipped"] += 1
             store.commit()
             done += len(batch)
-            _progress(done, total, f"Embedding cards… {done}/{total}")
+            _progress(done, total, f"Embedding cards… {done}/{total}", cancel)
 
         # --- image captions (optional, slow) ---
         if image_enabled and not stats["cancelled"]:
             image_items = [w for w in work if w["need_images"]]
             for w in image_items:
-                if _want_cancel():
+                if cancel.is_set():
                     stats["cancelled"] = True
                     break
                 captions: list[str] = []
@@ -166,24 +176,28 @@ def _embed_and_store(payload: dict, cfg: dict) -> dict:
                     combined = "  ".join(captions)
                     try:
                         pairs, d = embedder.embed_batch(client, model, [combined], "document")
+                        if d:
+                            if not store.is_compatible(model, d):  # L8: mirror text path
+                                store.reset()
+                            store.set_meta(model, d)
+                        bin_bytes, f32_bytes = pairs[0]
+                        if bin_bytes:
+                            ref = ";".join(w["images"])[:300]
+                            store.replace_image_vectors(
+                                w["note_id"], [(ref, combined, bin_bytes, f32_bytes)]
+                            )
                     except Exception as e:
+                        # Don't loop forever re-captioning: record the hash anyway
+                        # (the note just won't be image-searchable until it changes
+                        # or a full rebuild) (H5b).
                         log.error("image caption embed failed", e)
                         stats["errors"] += 1
-                        continue
-                    if d:
-                        store.set_meta(model, d)
-                    bin_bytes, f32_bytes = pairs[0]
-                    if bin_bytes:
-                        ref = ";".join(w["images"])[:300]
-                        store.replace_image_vectors(
-                            w["note_id"], [(ref, combined, bin_bytes, f32_bytes)]
-                        )
-                # update note state so we don't re-caption next run
+                # Mark this note's image state clean so we don't re-caption it.
                 store.upsert_note_state(w["note_id"], w["mod"],
                                         w["content_hash"], w["img_hash"])
                 store.commit()
                 done += 1
-                _progress(done, total, f"Reading images… {done}/{total}")
+                _progress(done, total, f"Reading images… {done}/{total}", cancel)
 
         store.commit()
         stats["counts"] = store.counts()
@@ -195,11 +209,17 @@ def _embed_and_store(payload: dict, cfg: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # Public entry
 # --------------------------------------------------------------------------- #
+_progress_open = False
+
+
 def run_index(force_rebuild: bool = False,
               on_done: Callable[[dict], None] | None = None) -> None:
-    """Build/refresh the semantic index in the background. Safe to call anytime."""
+    """Build/refresh the semantic index in the background. Safe to call anytime.
+
+    Nothing here blocks the UI thread: the liveness probe, the collection scan,
+    and the embedding all run in the background, with a single progress dialog.
+    """
     global _running
-    from aqt import mw
     from aqt.utils import tooltip
 
     if _running:
@@ -207,15 +227,21 @@ def run_index(force_rebuild: bool = False,
         return
 
     cfg = cfgmod.get()
-    client = AIClient(cfg)
-    if not client.is_alive():
-        tooltip("Smart Search: local AI server isn't reachable — can't build index.")
-        if on_done:
-            on_done({"error": "offline"})
-        return
-
     _running = True
+    cancel = threading.Event()
 
+    # 1) Liveness probe OFF the main thread (H2).
+    def probe() -> bool:
+        return AIClient(cfg).is_alive()
+
+    def after_probe(alive: bool) -> None:
+        if not alive:
+            _finish({"error": "offline"}, on_done)
+            return
+        _start_progress("Smart Search: scanning notes…")
+        ops.run_query(scan_op, after_scan, scan_fail, uses_collection=True)
+
+    # 2) Read-only collection scan.
     def scan_op(col) -> dict:
         payload = _scan(col, cfg, force_rebuild)
         payload["media_dir"] = colread.media_dir(col)
@@ -230,13 +256,13 @@ def run_index(force_rebuild: bool = False,
             return
         text_n = sum(1 for w in work if w["need_text"])
         img_n = sum(1 for w in work if w["need_images"])
-        mw.progress.start(
-            label=f"Smart Search: indexing {text_n} cards"
-                  + (f", {img_n} with images" if img_n else "") + "…",
-            max=text_n + img_n, immediate=True,
-        )
+        _update_progress(
+            f"Smart Search: indexing {text_n} cards"
+            + (f", {img_n} with images" if img_n else "") + "…",
+            text_n + img_n)
+        # 3) Embed/caption OFF the collection executor (no collection needed).
         ops.run_network(
-            lambda: _embed_and_store(payload, cfg),
+            lambda: _embed_and_store(payload, cfg, cancel),
             success=lambda stats: _finish(stats, on_done),
             failure=lambda exc: _finish({"error": str(exc)}, on_done),
         )
@@ -244,22 +270,52 @@ def run_index(force_rebuild: bool = False,
     def scan_fail(exc: Exception) -> None:
         _finish({"error": str(exc)}, on_done)
 
-    ops.run_query(scan_op, after_scan, scan_fail,
-                  uses_collection=True, with_progress=True,
-                  label="Smart Search: scanning notes…")
+    ops.run_network(probe, after_probe,
+                    failure=lambda exc: _finish({"error": str(exc)}, on_done))
+
+
+def _start_progress(label: str) -> None:
+    global _progress_open
+    from aqt import mw
+    try:
+        mw.progress.start(label=label, immediate=True)
+        _progress_open = True
+    except Exception:
+        _progress_open = False
+
+
+def _update_progress(label: str, maximum: int) -> None:
+    from aqt import mw
+    try:
+        mw.progress.update(label=label, value=0, max=maximum)
+    except Exception:
+        pass
 
 
 def _finish(stats: dict, on_done: Callable[[dict], None] | None) -> None:
-    global _running
+    global _running, _progress_open
     from aqt import mw
     from aqt.utils import tooltip
 
     _running = False
+    if _progress_open:
+        try:
+            mw.progress.finish()
+        except Exception:
+            pass
+        _progress_open = False
+
+    # Make any newly written vectors visible to the next search immediately (L9).
     try:
-        mw.progress.finish()
+        from ..search import semantic
+        semantic.invalidate_cache()
     except Exception:
         pass
-    if "error" in stats:
+
+    errors = stats.get("errors", 0)
+    if stats.get("error") == "offline":
+        tooltip("Smart Search: local AI isn't reachable — start it, then rebuild.")
+    elif "error" in stats:
         tooltip(f"Smart Search: indexing error — {stats['error']}")
     elif stats.get("up_to_date"):
         tooltip("Smart Search: index already up to date ✓")
@@ -269,6 +325,8 @@ def _finish(stats: dict, on_done: Callable[[dict], None] | None) -> None:
         msg = f"Smart Search: indexed {stats.get('embedded',0)} cards"
         if stats.get("captioned"):
             msg += f", {stats['captioned']} images"
-        tooltip(msg + " ✓")
+        if errors:
+            msg += f" ⚠ {errors} batch(es) failed — rerun to finish"
+        tooltip(msg + (" ✓" if not errors else ""))
     if on_done:
         on_done(stats)

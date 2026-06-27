@@ -81,9 +81,13 @@ def retrieval_step(col, cfg: dict, payload: dict) -> dict:
     image_hits: set[int] = set()
     if query_vec is not None:
         qbin, qf32 = query_vec
+        # Restrict the semantic scan to the configured scope BEFORE truncation so a
+        # subdeck scope never starves the top-K (C1).
+        scope = colread.build_scope_query(cfg)
+        allowed = set(colread.find_note_ids(col, scope)) if scope else None
         sem = semantic.search(qbin, qf32, top_k=max_results * 2,
-                              candidates=int(cfg.get("semantic_candidates", 300)))
-        sem = _apply_scope(col, cfg, sem)
+                              candidates=int(cfg.get("semantic_candidates", 300)),
+                              allowed=allowed)
         semantic_ids = [nid for nid, _score, _kind in sem]
         image_hits = {nid for nid, _s, kind in sem if kind == "image"}
 
@@ -115,14 +119,6 @@ def retrieval_step(col, cfg: dict, payload: dict) -> dict:
             "shown": len(results),
         },
     }
-
-
-def _apply_scope(col, cfg, sem):
-    scope = colread.build_scope_query(cfg)
-    if not scope:
-        return sem
-    allowed = set(colread.find_note_ids(col, scope))
-    return [t for t in sem if t[0] in allowed]
 
 
 def _build_results(col, note_ids: list[int], image_hits: set[int]) -> list[dict]:

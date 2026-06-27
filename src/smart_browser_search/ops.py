@@ -71,4 +71,6 @@ def run_network(
             return
         on_main(lambda: success(result))
 
-    mw.taskman.run_in_background(task, _done)
+    # uses_collection=False keeps network work OFF the single collection-serialized
+    # worker, so a slow LLM/embedding call never queues behind a collection op.
+    mw.taskman.run_in_background(task, _done, uses_collection=False)

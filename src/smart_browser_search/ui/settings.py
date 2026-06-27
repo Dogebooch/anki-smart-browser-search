@@ -193,20 +193,33 @@ class SettingsDialog(QDialog):
     def _client(self) -> AIClient:
         return AIClient(self._collect())
 
+    def _alive(self) -> bool:
+        """False once the dialog's C++ object is gone (closed mid-request, M4)."""
+        try:
+            from aqt.qt import sip
+            return not sip.isdeleted(self)
+        except Exception:
+            return True
+
+    def _set_conn(self, text: str) -> None:
+        if self._alive():
+            self.conn_label.setText(text)
+
     def _test(self) -> None:
         self.conn_label.setText("Testing…")
         client = self._client()
         ops.run_network(
             client.is_alive,
-            lambda ok: self.conn_label.setText("✓ Connected" if ok
-                                               else "✗ Not reachable"),
-            lambda e: self.conn_label.setText(f"✗ {e}"))
+            lambda ok: self._set_conn("✓ Connected" if ok else "✗ Not reachable"),
+            lambda e: self._set_conn(f"✗ {e}"))
 
     def _detect(self) -> None:
         self.conn_label.setText("Detecting models…")
         client = self._client()
-        ops.run_network(client.list_models, self._fill_models,
-                        lambda e: self.conn_label.setText(f"✗ {e}"))
+        ops.run_network(
+            client.list_models,
+            lambda models: self._fill_models(models) if self._alive() else None,
+            lambda e: self._set_conn(f"✗ {e}"))
 
     def _fill_models(self, models: list[str]) -> None:
         self.conn_label.setText(f"✓ {len(models)} models found")
@@ -223,7 +236,8 @@ class SettingsDialog(QDialog):
 
     def _after_index(self, stats: dict) -> None:
         semantic.invalidate_cache()
-        self._refresh_index_label()
+        if self._alive():
+            self._refresh_index_label()
 
     def _refresh_index_label(self) -> None:
         try:

@@ -28,7 +28,20 @@
   function hideEmpty() { if (el.empty) el.empty.classList.add("sbs-hidden"); }
 
   /* ---------------- sending ---------------- */
+  var busy = false;
+  function setBusyUI(on) {
+    busy = on;
+    if (el.send) {
+      el.send.textContent = on ? "■" : "➤";
+      el.send.title = on ? "Stop" : "Send (Enter)";
+    }
+  }
+  function onSendClick() {
+    if (busy) { cmd("stop"); setThinking(false); return; }  // Stop in-flight turn
+    sendFromInput();
+  }
   function sendText(text) {
+    if (busy) return;                 // don't queue / orphan a bubble while busy
     text = (text || "").trim();
     if (!text) return;
     hideEmpty();
@@ -54,6 +67,7 @@
 
   var thinkingNode = null;
   function setThinking(on) {
+    setBusyUI(on);
     if (on) {
       if (thinkingNode) return;
       thinkingNode = make("div", "sbs-msg assistant");
@@ -247,6 +261,7 @@
   }
 
   function clearChat() {
+    setThinking(false);
     el.messages.querySelectorAll(".sbs-msg").forEach(function (n) { n.remove(); });
     if (el.empty) el.empty.classList.remove("sbs-hidden");
     onImageCleared();
@@ -290,8 +305,9 @@
     el.input = $("sbs-input");
     el.attach = $("sbs-attach");
     el.attachName = $("sbs-attach-name");
+    el.send = $("sbs-send");
 
-    $("sbs-send").onclick = sendFromInput;
+    el.send.onclick = onSendClick;
     $("sbs-newchat").onclick = function () { cmd("new_chat"); };
     $("sbs-settings").onclick = function () { cmd("open_settings"); };
     $("sbs-pick-image").onclick = function () { cmd("pick_image"); };

@@ -12,7 +12,7 @@ import json
 import os
 import weakref
 
-from aqt import gui_hooks, mw
+from aqt import mw
 from aqt.qt import QApplication, QFileDialog
 from aqt.utils import tooltip
 from aqt.webview import AnkiWebView
@@ -209,6 +209,7 @@ class SmartSearchPanel:
         assistant = res.get("assistant", {})
         self.history.append({"role": "user", "content": user_text})
         self.history.append({"role": "assistant", "content": assistant.get("reply", "")})
+        had_image = self.pending_image is not None
         self.pending_image = None
         cfg = cfgmod.get()
         self._emit("assistant", {
@@ -223,8 +224,9 @@ class SmartSearchPanel:
             "timing_ms": res.get("timing_ms", 0),
             "model": res.get("model", ""),
             "show_latency": bool(cfg.get("show_latency", True)),
-            "image_cleared": True,
         })
+        if had_image:
+            self._emit("image_cleared", {})
 
     def _on_error(self, seq: int, exc: Exception) -> None:
         if seq != self._turn_seq:
@@ -264,8 +266,13 @@ class SmartSearchPanel:
             return
         try:
             self.browser.search_for(query)
+            # Optionally hand keyboard focus to the results table so the user can
+            # arrow through the matched cards immediately.
             if cfgmod.get().get("auto_run_search"):
-                self.browser.form.searchEdit.setFocus()
+                try:
+                    self.browser.form.tableView.setFocus()
+                except Exception:
+                    pass
         except Exception as e:
             log.warn(f"search_for failed: {e}")
             try:
@@ -335,13 +342,21 @@ class SmartSearchPanel:
 
     def _start_ai_server(self) -> None:
         import subprocess
+        import sys
         cfg = cfgmod.get()
         started = False
+        creationflags = 0
+        if sys.platform == "win32":
+            # Don't flash a console window or tie the child to Anki's lifetime.
+            creationflags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                             | getattr(subprocess, "DETACHED_PROCESS", 0))
         if cfg.get("backend") == "ollama":
             for args in (["ollama", "serve"],):
                 try:
-                    subprocess.Popen(args, stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL)
+                    subprocess.Popen(  # type: ignore[call-overload]
+                        args, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=creationflags)
                     started = True
                     break
                 except Exception:
@@ -411,7 +426,3 @@ def _jsonable(obj):
         return obj
     except Exception:
         return {"info": str(obj)}
-
-
-def register_theme_hook() -> None:
-    gui_hooks.theme_did_change.append(notify_theme_changed)

@@ -79,7 +79,9 @@ def setup_browser(browser) -> None:
 def _add_to_menu(browser, act: QAction) -> None:
     # Prefer an existing top-level menu; fall back to the menubar itself.
     form = getattr(browser, "form", None)
-    for attr in ("menu_View", "menuView", "menu_Find", "menuJump"):
+    # 'menuqt_accel_view' is the real object name of the Browser's View menu;
+    # 'menuJump' is a stable fallback. Both exist on current builds.
+    for attr in ("menuqt_accel_view", "menuJump", "menu_View"):
         menu = getattr(form, attr, None)
         if menu is not None:
             try:

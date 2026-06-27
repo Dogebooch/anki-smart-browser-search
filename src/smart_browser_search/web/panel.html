@@ -1,0 +1,47 @@
+<div id="sbs-root" class="sbs-root">
+
+  <header class="sbs-header">
+    <div class="sbs-title">
+      <span class="sbs-spark" aria-hidden="true">✦</span>
+      <span>Smart&nbsp;AI&nbsp;Search</span>
+    </div>
+    <div class="sbs-header-actions">
+      <button class="sbs-iconbtn" id="sbs-newchat" title="New chat">⟲</button>
+      <button class="sbs-iconbtn" id="sbs-settings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <div id="sbs-banner" class="sbs-banner sbs-hidden" role="status"></div>
+
+  <main id="sbs-messages" class="sbs-messages" aria-live="polite">
+
+    <section id="sbs-empty" class="sbs-empty">
+      <div class="sbs-empty-spark">✦</div>
+      <h2>Find any card, in plain English</h2>
+      <p class="sbs-muted">Ask for a topic, fact, or concept. I’ll build the search,
+        surface the cards, and hand you a search string to keep browsing.</p>
+      <div class="sbs-samples" id="sbs-samples">
+        <button class="sbs-pill" data-q="inferior MI ECG findings">inferior MI ECG findings</button>
+        <button class="sbs-pill" data-q="cards with ECG images">cards with ECG images</button>
+        <button class="sbs-pill" data-q="Wellens syndrome">Wellens syndrome</button>
+        <button class="sbs-pill" data-q="hypertension with low potassium">that syndrome: HTN + low K⁺</button>
+        <button class="sbs-pill" data-q="DKA management">DKA management</button>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="sbs-attach" class="sbs-attach sbs-hidden">
+    <span class="sbs-attach-icon">🖼</span>
+    <span id="sbs-attach-name" class="sbs-attach-name"></span>
+    <button id="sbs-attach-clear" class="sbs-iconbtn" title="Remove image">✕</button>
+  </div>
+
+  <footer class="sbs-composer">
+    <button class="sbs-iconbtn sbs-imgbtn" id="sbs-pick-image" title="Search by image">🖼</button>
+    <textarea id="sbs-input" class="sbs-input" rows="1"
+      placeholder="Ask about your cards…" autocomplete="off"></textarea>
+    <button class="sbs-send" id="sbs-send" title="Send (Enter)">➤</button>
+  </footer>
+
+</div>

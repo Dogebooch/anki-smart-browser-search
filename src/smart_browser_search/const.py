@@ -1,0 +1,83 @@
+# -*- coding: utf-8 -*-
+"""Shared constants and small helpers for Smart Browser Search.
+
+This module must stay import-light: it is pulled in by almost everything else
+and must never import Qt or anki at module load time beyond the cheap bits.
+"""
+
+from __future__ import annotations
+
+ADDON_NAME = "Smart Browser Search"
+DOCK_OBJECT_NAME = "SmartBrowserSearchDock"  # stable id for Qt state save/restore
+
+# Index/schema versioning. Bump SCHEMA_VERSION if the SQLite layout changes in a
+# way that requires a rebuild.
+SCHEMA_VERSION = 1
+
+# Backend identifiers.
+BACKEND_OLLAMA = "ollama"          # native http://host:11434/api/*
+BACKEND_OPENAI = "openai"          # OpenAI-compatible http://host:port/v1/*
+
+# Roles for chat messages.
+ROLE_SYSTEM = "system"
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
+
+# Bridge command prefixes (JS -> Python). Keep in sync with web/panel.js.
+CMD_SEND = "send"                  # send:<json>  (a full turn payload)
+CMD_RUN_SEARCH = "run_search"      # run_search:<query>
+CMD_COPY = "copy"                  # copy:<text>
+CMD_REVEAL_CARD = "reveal_card"    # reveal_card:<cid>
+CMD_REVEAL_MANY = "reveal_many"    # reveal_many:<query>
+CMD_QUICK_REPLY = "answer"         # answer:<text>
+CMD_PICK_IMAGE = "pick_image"      # pick_image
+CMD_START_AI = "start_ai"          # start_ai
+CMD_RETRY_CONN = "retry_conn"      # retry_conn
+CMD_OPEN_SETTINGS = "open_settings"  # open_settings
+CMD_BUILD_INDEX = "build_index"    # build_index
+CMD_READY = "ready"                # ready  (webview finished loading)
+CMD_NEW_CHAT = "new_chat"          # new_chat
+CMD_STOP = "stop"                  # stop  (cancel in-flight request)
+
+# Default config. The shipped config.json must mirror this exactly; this copy is
+# the source of truth used to backfill any keys the user's saved config lacks
+# (so upgrades that add new keys never crash on a missing key).
+DEFAULTS: dict = {
+    "backend": BACKEND_OLLAMA,
+    "endpoint": "http://localhost:11434",
+    "api_key": "",  # ignored by local servers; some require a non-empty string
+    "chat_model": "qwen2.5:7b-instruct",
+    "embed_model": "nomic-embed-text",
+    "vision_model": "qwen2.5vl:7b",
+    "temperature": 0.2,
+    "num_ctx": 8192,
+    "request_timeout": 120,   # seconds for generation
+    "connect_timeout": 3,     # seconds for liveness probes
+    # Retrieval
+    "max_results": 25,
+    "semantic_enabled": False,       # Tier-2 is opt-in
+    "image_search_enabled": False,   # picture indexing is opt-in (slow first pass)
+    "rrf_k": 60,
+    "semantic_candidates": 300,      # top-N by Hamming before float rescore
+    # Scope: which decks/note types/fields are searchable. Empty = everything.
+    "scope_decks": [],
+    "scope_note_types": [],
+    "scope_fields": [],              # field names to embed; empty = all fields
+    "exclude_suspended": False,
+    # UI / behaviour
+    "shortcut": "Ctrl+Shift+F",
+    "dock_area": "right",            # "right" or "left"
+    "open_on_browser_start": False,
+    "auto_run_search": False,        # if True, pressing Run also focuses table
+    "show_latency": True,
+    "max_history_turns": 8,          # how many prior turns to send to the model
+    "context_card_chars": 600,       # max chars of a note shown to the model
+    # Index grounding: how many decks/tags/note types to show the model.
+    "ground_max_decks": 60,
+    "ground_max_tags": 80,
+    # Safety / diagnostics
+    "debug_logging": False,
+}
+
+# Sentinel marking work that must never run on the UI thread carelessly.
+INTERACTIVE_BUDGET_MS = 300

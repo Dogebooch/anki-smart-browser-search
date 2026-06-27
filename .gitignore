@@ -1,0 +1,47 @@
+# ---- Anki add-on user data (never commit a user's runtime data) ----
+# The add-on writes its index/cache/log here at runtime. Keep the placeholder
+# README (needed so the folder ships) but ignore everything else.
+src/smart_browser_search/user_files/*
+!src/smart_browser_search/user_files/README.md
+*.db
+*.db-wal
+*.db-shm
+smart_search.log
+*.ankiaddon
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# ---- Caches / tooling ----
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---- Editors / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Local secrets / scratch ----
+*.local
+secrets.json
+scratch/
+
+# ---- Claude Code session/runtime state ----
+.claude/
